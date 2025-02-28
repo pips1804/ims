@@ -55,6 +55,11 @@ def update_stock():
             new_stock = current_stock - quantity
             cursor.execute("UPDATE ims_product SET quantity = %s WHERE pid = %s", (new_stock, product_id))
 
+            cursor.execute(
+                "INSERT INTO ims_order (product_id, total_shipped, customer_id) VALUES (%s, %s, %s)",
+                (product_id, 1, 1)
+            )
+
         db.commit()
         cursor.close()
 
