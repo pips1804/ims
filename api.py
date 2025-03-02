@@ -3,25 +3,29 @@ import mysql.connector
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+CORS(app)
 
-# Database connection
-db = mysql.connector.connect(
-    host="localhost",
-    user="root",
-    password="",
-    database="ims_db"
-)
+# Function to get a new database connection
+def get_db_connection():
+    return mysql.connector.connect(
+        host="localhost",
+        user="root",
+        password="",
+        database="ims_db"
+    )
 
 @app.route('/api/products', methods=['GET'])
 def get_products():
+    db = get_db_connection()  # New connection for each request
     cursor = db.cursor(dictionary=True)
+    
     cursor.execute("SELECT pid, description, pname, base_price, quantity FROM ims_product")
     products = cursor.fetchall()
+    
     cursor.close()
+    db.close()  # Close the connection after use
 
     return jsonify(products)
-
 
 @app.route('/api/update_stock', methods=['POST'])
 def update_stock():
@@ -32,6 +36,7 @@ def update_stock():
         if not cart:
             return jsonify({"status": "error", "message": "Cart is empty."}), 400
 
+        db = get_db_connection()
         cursor = db.cursor()
         order_ids = []
 
@@ -44,12 +49,16 @@ def update_stock():
             result = cursor.fetchone()
 
             if not result:
+                cursor.close()
+                db.close()
                 return jsonify({"status": "error", "message": f"Product ID {product_id} not found."}), 404
 
             current_stock = result[0]
 
             # Check if enough stock is available
             if quantity > current_stock:
+                cursor.close()
+                db.close()
                 return jsonify({"status": "error", "message": f"Not enough stock for product ID {product_id}."}), 400
 
             # Update stock in database
@@ -61,13 +70,12 @@ def update_stock():
                 (product_id, 1, 1)
             )
 
-            order_id = cursor.lastrowid  # Get the last inserted order ID
+            order_id = cursor.lastrowid
             order_ids.append(order_id)
-
-
 
         db.commit()
         cursor.close()
+        db.close()
 
         return jsonify({"status": "success", "message": "Stock updated successfully.", "order_ids": order_ids}), 200
 
@@ -76,7 +84,9 @@ def update_stock():
 
 @app.route('/api/inventory', methods=['GET'])
 def get_inventory():
+    db = get_db_connection()  # Create a new connection
     cursor = db.cursor(dictionary=True)
+
     cursor.execute("""
         SELECT
             p.pid,
@@ -87,16 +97,15 @@ def get_inventory():
             (p.quantity + COALESCE(SUM(purchase.quantity), 0) - COALESCE(SUM(o.total_shipped), 0)) AS inventory_on_hand
         FROM ims_product p
         LEFT JOIN ims_purchase purchase ON p.pid = purchase.product_id
-        LEFT JOIN `ims_order` o ON p.pid = o.product_id  -- Wrapped `order` in backticks
+        LEFT JOIN ims_order o ON p.pid = o.product_id
         GROUP BY p.pid, p.pname, p.quantity
     """)
 
     inventory = cursor.fetchall()
     cursor.close()
+    db.close()  # Close the connection
 
     return jsonify(inventory)
-
-
 
 if __name__ == '__main__':
     print("Starting Flask API...")  # Debugging statement
