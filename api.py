@@ -19,7 +19,7 @@ def get_products():
     cursor.execute("SELECT pid, description, pname, base_price, quantity FROM ims_product")
     products = cursor.fetchall()
     cursor.close()
-    
+
     return jsonify(products)
 
 
@@ -68,6 +68,30 @@ def update_stock():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+@app.route('/api/inventory', methods=['GET'])
+def get_inventory():
+    cursor = db.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT
+            p.pid,
+            p.pname AS product_name,
+            p.quantity AS starting_inventory,
+            COALESCE(SUM(purchase.quantity), 0) AS inventory_received,
+            COALESCE(SUM(o.total_shipped), 0) AS inventory_shipped,
+            (p.quantity + COALESCE(SUM(purchase.quantity), 0) - COALESCE(SUM(o.total_shipped), 0)) AS inventory_on_hand
+        FROM ims_product p
+        LEFT JOIN ims_purchase purchase ON p.pid = purchase.product_id
+        LEFT JOIN `ims_order` o ON p.pid = o.product_id  -- Wrapped `order` in backticks
+        GROUP BY p.pid, p.pname, p.quantity
+    """)
+
+    inventory = cursor.fetchall()
+    cursor.close()
+
+    return jsonify(inventory)
+
+
 
 if __name__ == '__main__':
+    print("Starting Flask API...")  # Debugging statement
     app.run(debug=True, host='0.0.0.0', port=5000)
