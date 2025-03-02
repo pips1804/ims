@@ -33,6 +33,7 @@ def update_stock():
             return jsonify({"status": "error", "message": "Cart is empty."}), 400
 
         cursor = db.cursor()
+        order_ids = []
 
         for item in cart:
             product_id = item.get("id")
@@ -60,10 +61,15 @@ def update_stock():
                 (product_id, 1, 1)
             )
 
+            order_id = cursor.lastrowid  # Get the last inserted order ID
+            order_ids.append(order_id)
+
+
+
         db.commit()
         cursor.close()
 
-        return jsonify({"status": "success", "message": "Stock updated successfully."}), 200
+        return jsonify({"status": "success", "message": "Stock updated successfully.", "order_ids": order_ids}), 200
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
