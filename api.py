@@ -1,9 +1,17 @@
 from flask import Flask, request, jsonify
 import mysql.connector
 from flask_cors import CORS
+import os
+from pyzbar.pyzbar import decode
+import json
+import cv2
+
 
 app = Flask(__name__)
 CORS(app)
+
+UPLOAD_FOLDER = "products_qr_codes"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # Function to get a new database connection
 def get_db_connection():
@@ -106,6 +114,52 @@ def get_inventory():
     db.close()  # Close the connection
 
     return jsonify(inventory)
+
+@app.route('/api/add_product', methods=['POST'])
+def upload_qr():
+    if "qr_code" not in request.files:
+        return jsonify({"status": "error", "message": "No file uploaded"}), 400
+
+    qr_file = request.files["qr_code"]
+    file_path = os.path.join(UPLOAD_FOLDER, qr_file.filename)
+    qr_file.save(file_path)
+
+    # Process QR Code
+    image = cv2.imread(file_path)
+    decoded_objects = decode(image)
+
+    if not decoded_objects:
+        return jsonify({"status": "error", "message": "QR code not detected"}), 400
+
+    qr_data = decoded_objects[0].data.decode("utf-8")  # Extract QR text
+    product_data = json.loads(qr_data)  # Convert JSON string to Python dictionary
+
+    # Save to Database (Example)
+    db = get_db_connection()
+    cursor = db.cursor()
+    cursor.execute("""
+    INSERT INTO ims_product 
+    (categoryid, brandid, pname, model, description, quantity, unit, base_price, tax, minimum_order, supplier, status)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+""", (
+    product_data["category_id"],
+    product_data["brand_id"],
+    product_data["name"],  
+    product_data["model"],
+    product_data["description"],
+    product_data["quantity"],
+    product_data["unit"],
+    product_data["base_price"],
+    product_data["tax"],
+    product_data["min_order"],
+    product_data["supplier"],
+    product_data["status"]
+))
+    db.commit()
+    cursor.close()
+    db.close()
+
+    return jsonify({"status": "success", "product": product_data}), 200
 
 if __name__ == '__main__':
     print("Starting Flask API...")  # Debugging statement
