@@ -35,8 +35,8 @@ def get_products():
 
     return jsonify(products)
 
-@app.route('/api/update_stock', methods=['POST'])
-def update_stock():
+@app.route('/api/add_order', methods=['POST'])
+def add_order():
     try:
         data = request.get_json()
         cart = data.get("cart", [])
@@ -70,8 +70,8 @@ def update_stock():
                 return jsonify({"status": "error", "message": f"Not enough stock for product ID {product_id}."}), 400
 
             # Update stock in database
-            new_stock = current_stock - quantity
-            cursor.execute("UPDATE ims_product SET quantity = %s WHERE pid = %s", (new_stock, product_id))
+            # new_stock = current_stock - quantity
+            # cursor.execute("UPDATE ims_product SET quantity = %s WHERE pid = %s", (new_stock, product_id))
 
             cursor.execute(
                 "INSERT INTO ims_order (product_id, total_shipped, customer_id) VALUES (%s, %s, %s)",
@@ -160,6 +160,46 @@ def upload_qr():
     db.close()
 
     return jsonify({"status": "success", "product": product_data}), 200
+
+@app.route('/api/update_stock', methods=['POST'])
+def update_stock():
+    try:
+        data = request.get_json()
+        products = data.get("products", [])
+
+        if not products:
+            return jsonify({"status": "error", "message": "No products provided"}), 400
+
+        db = get_db_connection()
+        cursor = db.cursor()
+
+        for item in products:
+            product_id = item.get("product_id")
+            quantity = int(item.get("quantity", 0))
+
+            if not product_id or quantity <= 0:
+                continue  # Skip invalid entries
+
+            # Check current stock
+            cursor.execute("SELECT quantity FROM ims_product WHERE pid = %s", (product_id,))
+            result = cursor.fetchone()
+
+            if not result:
+                continue  # Skip if product not found
+
+            # Update stock
+            new_stock = result[0] - quantity
+            cursor.execute("UPDATE ims_product SET quantity = %s WHERE pid = %s", (new_stock, product_id))
+
+        db.commit()
+        cursor.close()
+        db.close()
+
+        return jsonify({"status": "success", "message": "Stock updated successfully"}), 200
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 
 if __name__ == '__main__':
     print("Starting Flask API...")  # Debugging statement
