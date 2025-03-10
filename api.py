@@ -26,10 +26,10 @@ def get_db_connection():
 def get_products():
     db = get_db_connection()  # New connection for each request
     cursor = db.cursor(dictionary=True)
-    
+
     cursor.execute("SELECT pid, description, pname, base_price, quantity FROM ims_product")
     products = cursor.fetchall()
-    
+
     cursor.close()
     db.close()  # Close the connection after use
 
@@ -138,13 +138,13 @@ def upload_qr():
     db = get_db_connection()
     cursor = db.cursor()
     cursor.execute("""
-    INSERT INTO ims_product 
+    INSERT INTO ims_product
     (categoryid, brandid, pname, model, description, quantity, unit, base_price, tax, minimum_order, supplier, status)
     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """, (
     product_data["category_id"],
     product_data["brand_id"],
-    product_data["name"],  
+    product_data["name"],
     product_data["model"],
     product_data["description"],
     product_data["quantity"],
