@@ -74,8 +74,8 @@ def add_order():
             # cursor.execute("UPDATE ims_product SET quantity = %s WHERE pid = %s", (new_stock, product_id))
 
             cursor.execute(
-                "INSERT INTO ims_order (product_id, total_shipped, customer_id) VALUES (%s, %s, %s)",
-                (product_id, 1, 1)
+                "INSERT INTO ims_order (product_id, customer_id) VALUES (%s, %s)",
+                (product_id, 1)
             )
 
             order_id = cursor.lastrowid
@@ -96,17 +96,18 @@ def get_inventory():
     cursor = db.cursor(dictionary=True)
 
     cursor.execute("""
-        SELECT
-            p.pid,
-            p.pname AS product_name,
-            p.quantity AS starting_inventory,
-            COALESCE(SUM(purchase.quantity), 0) AS inventory_received,
-            COALESCE(SUM(o.total_shipped), 0) AS inventory_shipped,
-            (p.quantity + COALESCE(SUM(purchase.quantity), 0) - COALESCE(SUM(o.total_shipped), 0)) AS inventory_on_hand
-        FROM ims_product p
-        LEFT JOIN ims_purchase purchase ON p.pid = purchase.product_id
-        LEFT JOIN ims_order o ON p.pid = o.product_id
-        GROUP BY p.pid, p.pname, p.quantity
+SELECT
+    p.pid,
+    p.pname AS product_name,
+    (SELECT MAX(quantity) FROM ims_product WHERE pid = p.pid) AS starting_inventory,
+    COALESCE(SUM(purchase.quantity), 0) AS inventory_received,
+    COALESCE(SUM(o.total_shipped), 0) AS inventory_shipped,
+    (p.quantity + COALESCE(SUM(purchase.quantity), 0) - COALESCE(SUM(o.total_shipped), 0)) AS inventory_on_hand
+FROM ims_product p
+LEFT JOIN ims_purchase purchase ON p.pid = purchase.product_id
+LEFT JOIN ims_order o ON p.pid = o.product_id
+GROUP BY p.pid, p.pname, p.quantity;
+
     """)
 
     inventory = cursor.fetchall()
@@ -134,32 +135,48 @@ def upload_qr():
     qr_data = decoded_objects[0].data.decode("utf-8")  # Extract QR text
     product_data = json.loads(qr_data)  # Convert JSON string to Python dictionary
 
-    # Save to Database (Example)
+    # Save to Database
     db = get_db_connection()
     cursor = db.cursor()
+
+    # Insert into ims_product table
     cursor.execute("""
     INSERT INTO ims_product
     (categoryid, brandid, pname, model, description, quantity, unit, base_price, tax, minimum_order, supplier, status)
     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-""", (
-    product_data["category_id"],
-    product_data["brand_id"],
-    product_data["name"],
-    product_data["model"],
-    product_data["description"],
-    product_data["quantity"],
-    product_data["unit"],
-    product_data["base_price"],
-    product_data["tax"],
-    product_data["min_order"],
-    product_data["supplier"],
-    product_data["status"]
-))
+    """, (
+        product_data["category_id"],
+        product_data["brand_id"],
+        product_data["name"],
+        product_data["model"],
+        product_data["description"],
+        product_data["quantity"],  # Quantity input when adding product
+        product_data["unit"],
+        product_data["base_price"],
+        product_data["tax"],
+        product_data["min_order"],
+        product_data["supplier"],
+        product_data["status"]
+    ))
+
+    product_id = cursor.lastrowid  # Get the inserted product ID
+    purchase_quantity = product_data["quantity"]  # Set purchase quantity
+
+    cursor.execute("SELECT COUNT(*) FROM ims_purchase WHERE product_id = %s", (product_id,))
+    exists = cursor.fetchone()[0]
+
+    if exists == 0:  # Only insert if it doesn’t already exist
+        cursor.execute(
+        "INSERT INTO ims_purchase (supplier_id, product_id, quantity, purchase_date) VALUES (%s, %s, %s, NOW())",
+        (product_data["supplier"], product_id, purchase_quantity)
+        )
+
     db.commit()
     cursor.close()
     db.close()
 
-    return jsonify({"status": "success", "product": product_data}), 200
+    return jsonify({"status": "success", "product_id": product_id, "purchase_quantity": purchase_quantity, "product": product_data}), 200
+
 
 @app.route('/api/update_stock', methods=['POST'])
 def update_stock():
@@ -190,6 +207,15 @@ def update_stock():
             # Update stock
             new_stock = result[0] - quantity
             cursor.execute("UPDATE ims_product SET quantity = %s WHERE pid = %s", (new_stock, product_id))
+
+            cursor.execute(
+                """
+                UPDATE ims_order
+                SET total_shipped = total_shipped + %s, customer_id = %s
+                WHERE product_id = %s
+                """,
+                (quantity, 1, product_id)
+            )
 
         db.commit()
         cursor.close()
